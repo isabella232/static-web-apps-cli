@@ -58,22 +58,13 @@ export async function handleUserConfig(appLocation: string): Promise<SWAConfigFi
 
   let configJson: SWAConfigFile | undefined;
   try {
-    configJson = require(configFile.file) as SWAConfigFile;
-    configJson.isLegacyConfigFile = configFile.isLegacyConfigFile;
-
-    logger.info(`\nFound configuration file:\n    ${chalk.green(configFile.file)}`);
-
-    if (configFile.isLegacyConfigFile) {
-      logger.info(
-        `    ${chalk.yellow(`WARNING: Functionality defined in the routes.json file is now deprecated`)}\n` +
-          `    ${chalk.yellow(`Read more: https://docs.microsoft.com/azure/static-web-apps/configuration#routes`)}`
-      );
-    }
+    configJson = require(configFile.filepath) as SWAConfigFile;
+    logger.info(`\nFound configuration file:\n    ${chalk.green(configFile.filepath)}`);
 
     return configJson;
   } catch (error) {
     logger.silly(`${chalk.red("configuration file is invalid!")}`);
-    logger.silly(`${chalk.red(error.toString())}`);
+    logger.silly(`${chalk.red((error as any).toString())}`);
   }
 
   return configJson;

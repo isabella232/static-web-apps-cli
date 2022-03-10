@@ -1,7 +1,10 @@
+import chalk from "chalk";
 import fs, { promises as fsPromises } from "fs";
 import type http from "http";
 import path from "path";
+import Ajv from "ajv";
 import { DEFAULT_CONFIG } from "../../config";
+import { logger } from "./logger";
 import { isHttpUrl } from "./net";
 const { readdir, readFile } = fsPromises;
 
@@ -38,37 +41,95 @@ export async function* traverseFolder(folder: string): AsyncGenerator<string> {
  * @returns `staticwebapp.config.json` if it was found, or fallback to `routes.json`. Return `null` if none were found.
  */
 export async function findSWAConfigFile(folder: string) {
-  const configFiles = new Map<string, { file: string; isLegacyConfigFile: boolean }>();
+  const configFiles = new Map<string, { filepath: string; isLegacyConfigFile: boolean; content: string }>();
+  // const parse = await getSWAConfigSchemaParser();
+  const validate = await getSWAConfigSchemaValidator();
 
-  for await (const file of traverseFolder(folder)) {
-    const filename = path.basename(file) as string;
+  for await (const filepath of traverseFolder(folder)) {
+    const filename = path.basename(filepath) as string;
 
     if (filename === DEFAULT_CONFIG.swaConfigFilename || filename === DEFAULT_CONFIG.swaConfigFilenameLegacy) {
-      const config = JSON.parse((await readFile(file)).toString("utf-8"));
+      const content = (await readFile(filepath)).toString("utf-8");
+      const config = JSON.parse(content);
+
+      console.log({ content });
 
       // make sure we are using the right SWA config file.
       // Note: some JS frameworks (eg. Nuxt, Scully) use routes.json as part of their config. We need to ignore those
-      const isValidSWAConfigFile = config.globalHeaders || config.mimeTypes || config.navigationFallback || config.responseOverrides || config.routes;
+      const isValidSWAConfigFile =
+        validate(content) || config.globalHeaders || config.mimeTypes || config.navigationFallback || config.responseOverrides || config.routes;
       if (isValidSWAConfigFile) {
         const isLegacyConfigFile = filename === DEFAULT_CONFIG.swaConfigFilenameLegacy;
-        configFiles.set(filename, { file, isLegacyConfigFile });
+        configFiles.set(filename, { filepath, isLegacyConfigFile, content });
+      } else {
+        logger.info(`    ${chalk.yellow(`WARNING: invalid ${filename} file detected`)}\n`);
       }
     }
   }
-
   // take staticwebapp.config.json if it exists (and ignore routes.json legacy file)
   if (configFiles.has(DEFAULT_CONFIG.swaConfigFilename!)) {
-    return configFiles.get(DEFAULT_CONFIG.swaConfigFilename!);
+    const file = configFiles.get(DEFAULT_CONFIG.swaConfigFilename!);
+    return file;
   }
 
   // fallback to legacy config file
   if (configFiles.has(DEFAULT_CONFIG.swaConfigFilenameLegacy!)) {
+    logger.info(
+      `    ${chalk.yellow(`WARNING: Functionality defined in the routes.json file is now deprecated`)}\n` +
+        `    ${chalk.yellow(`Read more: https://docs.microsoft.com/azure/static-web-apps/configuration#routes`)}`
+    );
+
     return configFiles.get(DEFAULT_CONFIG.swaConfigFilenameLegacy!);
   }
 
   // no config file found
   return null;
 }
+
+async function loadSchema() {
+  // const res = await fetch("https://json.schemastore.org/staticwebapp.config.json");
+  // return await res.json();
+
+  return require(path.join(__dirname, "../../schema/staticwebapp.config.schema.json"));
+}
+
+// @ts-ignore
+async function getSWAConfigSchemaValidator() {
+  const ajv = new Ajv({
+    meta: false, // optional, to prevent adding draft-06 meta-schema,
+    strict: false,
+  });
+  const schema = await loadSchema();
+  // patchDraftV4Schema(ajv);
+  const validate = ajv.compile(schema);
+
+  // memoise so we avoid recompiling the schema on each call
+  return (data: string) => validate(data);
+}
+
+// // @ts-ignore
+// async function getSWAConfigSchemaParser() {
+//   const jtd = new JTD({
+//     meta: false, // optional, to prevent adding draft-06 meta-schema,
+
+//   });
+//   patchDraftV4Schema(jtd);
+//   const schema = await loadSchema();
+//   const parse = jtd.compileParser(schema);
+
+//   // memoise so we avoid recompiling the schema on each call
+//   return (data: string) => parse(data);
+// }
+
+// function patchDraftV4Schema(ajv: Ajv) {
+//   // See https://github.com/ajv-validator/ajv/releases/tag/5.0.0
+//   const metaSchema = require("ajv-draft-04/dist/refs/json-schema-draft-04.json");
+//   ajv.addMetaSchema(metaSchema);
+//   ajv.opts.defaultMeta = metaSchema.id;
+
+//   // optional, using unversioned URI is out of spec, see https://github.com/json-schema-org/json-schema-spec/issues/216
+//   ajv.refs["http://json-schema.org/schema"] = "http://json-schema.org/draft-04/schema";
+// }
 
 /**
  * Valide and normalize all paths of a workflow confifuration.
