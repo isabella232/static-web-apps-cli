@@ -7,7 +7,8 @@
       "port": 1234,
       "host": "0.0.0.0",
       "devserverTimeout": 10000,
-      "verbose": "silly"
+      "verbose": "silly",
+      "swaConfigLocation": "./cypress/fixtures/static/"
     }
   }
 }
